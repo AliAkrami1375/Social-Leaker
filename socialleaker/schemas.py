@@ -56,7 +56,7 @@ class TaskIn(BaseModel):
     title: str | None = None
     prompt: str = Field(min_length=1)
     platform: str = "instagram"
-    goal_target: int = 25
+    goal_target: int = 0        # 0 = collect everything discovered (no hard cap)
     max_iterations: int = 12
 
 

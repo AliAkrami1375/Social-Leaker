@@ -46,6 +46,17 @@ const IG_LOGO = `<svg viewBox="0 0 48 48" width="38" height="38" aria-hidden="tr
 const genLogo = (name) => `<div class="gen-logo">${esc((name || '?')[0].toUpperCase())}</div>`;
 const platformIcon = (provider, name) => provider === 'instagram' ? IG_LOGO : genLogo(name);
 
+// Avatar: shows the real profile picture with a letter fallback if it fails/expires.
+function avatarHtml(username, pic) {
+  const letter = esc(((username || '?')[0] || '?').toUpperCase());
+  // Route through our proxy so Instagram/Reddit hotlink protection is bypassed;
+  // if the image is gone/expired the <img> removes itself and the letter shows.
+  const img = pic
+    ? `<img class="pfp-img" src="/api/avatar?u=${encodeURIComponent(pic)}" alt="" loading="lazy" onerror="this.remove()">`
+    : '';
+  return `<div class="pfp">${img}<span>${letter}</span></div>`;
+}
+
 // ── Modal ──────────────────────────────────────────────────
 function openModal(title, body, foot) {
   const m = $('#modal');
@@ -61,17 +72,41 @@ $('#modalBackdrop').addEventListener('click', (e) => { if (e.target.id === 'moda
 // ── Router ─────────────────────────────────────────────────
 const TITLES = { dashboard: 'Dashboard', tasks: 'Tasks', platforms: 'Platforms', settings: 'Settings' };
 let currentView = 'dashboard';
+let currentTaskId = null;   // set when a task detail is open (for deep-linking)
+
 function showView(name, skipHash) {
   if (!TITLES[name]) name = 'dashboard';
   currentView = name;
+  currentTaskId = null;
   if (!skipHash && location.hash.slice(1) !== name) location.hash = name;
   $$('.nav-item').forEach((n) => n.classList.toggle('active', n.dataset.view === name));
   $$('.view').forEach((v) => (v.hidden = v.dataset.view !== name));
   $('#viewTitle').textContent = TITLES[name] || name;
   ({ dashboard: loadDashboard, tasks: loadTasks, platforms: loadPlatforms, settings: loadSettings }[name] || (() => {}))();
 }
+
+// Route from the URL hash. Supports `#tasks/<id>` so a refresh restores the
+// live task-detail view instead of dropping you back on the list.
+function applyRoute() {
+  const parts = location.hash.slice(1).split('/');
+  if (parts[0] === 'tasks' && parts[1]) {
+    const id = +parts[1];
+    if (currentView === 'tasks' && currentTaskId === id) return;
+    if (currentView !== 'tasks') {
+      currentView = 'tasks';
+      $$('.nav-item').forEach((n) => n.classList.toggle('active', n.dataset.view === 'tasks'));
+      $$('.view').forEach((v) => (v.hidden = v.dataset.view !== 'tasks'));
+      $('#viewTitle').textContent = 'Tasks';
+    }
+    openTask(id);
+    return;
+  }
+  const view = parts[0] || 'dashboard';
+  if (view === currentView && !currentTaskId) return;
+  showView(view, true);
+}
 $$('.nav-item').forEach((n) => n.addEventListener('click', () => showView(n.dataset.view)));
-window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (v && v !== currentView) showView(v, true); });
+window.addEventListener('hashchange', applyRoute);
 document.addEventListener('click', (e) => { const g = e.target.closest('[data-goto]'); if (g) showView(g.dataset.goto); });
 
 $('#logoutBtn').addEventListener('click', async () => { await api.post('/api/auth/logout').catch(() => {}); window.location.href = '/login'; });
@@ -137,6 +172,20 @@ async function updateAgentBadge() {
     const b = $('#agentBadge');
     b.classList.toggle('on', st.connected);
     b.classList.toggle('off', !st.connected);
+    // Professional auto-detect: if Claude Code is already logged in on this
+    // machine but not yet connected here, connect it automatically (once/session).
+    if (!st.connected && st.sdk_available && st.cli_logged_in && !sessionStorage.getItem('claudeAutoTried')) {
+      try { sessionStorage.setItem('claudeAutoTried', '1'); } catch (_) {}
+      b.title = 'Claude Code detected — connecting…';
+      try {
+        const r = await api.post('/api/integrations/claude/login');
+        if (r.ok) {
+          b.classList.add('on'); b.classList.remove('off');
+          toast('Claude Code auto-connected ✓', 'good');
+          if (currentView === 'settings') loadSettings();
+        }
+      } catch (_) {}
+    }
   } catch (_) {}
 }
 
@@ -166,9 +215,13 @@ async function loadTasks() {
 }
 
 function progressBar(t) {
-  const pct = Math.min(100, Math.round((t.collected_count / Math.max(1, t.goal_target)) * 100));
-  return `<div class="prog"><div class="prog-fill" style="width:${pct}%"></div></div>
-    <div class="prog-meta"><span>${t.collected_count}/${t.goal_target} collected</span><span>${t.iterations} loop(s)</span></div>`;
+  if (t.goal_target && t.goal_target > 0) {
+    const pct = Math.min(100, Math.round((t.collected_count / t.goal_target) * 100));
+    return `<div class="prog"><div class="prog-fill" style="width:${pct}%"></div></div>
+      <div class="prog-meta"><span>${fmt(t.collected_count)}/${fmt(t.goal_target)} collected</span><span>${t.iterations} loop(s)</span></div>`;
+  }
+  // No cap — show the running count without a fixed denominator.
+  return `<div class="prog-meta" style="margin-top:12px"><span><b>${fmt(t.collected_count)}</b> collected · no cap</span><span>${t.iterations} loop(s)</span></div>`;
 }
 
 function queueLabel(t) {
@@ -216,11 +269,9 @@ function openTaskForm() {
         <option value="instagram">Instagram</option>
         <option value="reddit">Reddit</option>
       </select></label>
-    <div class="row2">
-      <label class="field"><span>Goal (profiles)</span><input id="t_goal" type="number" value="25" min="1" max="500" /></label>
-      <label class="field"><span>Max loop iterations</span><input id="t_max" type="number" value="12" min="1" max="50" /></label>
-    </div>
-    <div class="hintbox">Give <b>seed handles</b> to collect known pages (works with no login). If you leave handles empty and only describe a topic, the task <b>searches Instagram</b> to discover pages — which needs a connected account (Platforms → Session ID).</div>
+    <label class="field"><span>Max profiles <span class="muted">(optional — leave blank to collect everything found)</span></span>
+      <input id="t_goal" type="number" placeholder="all" min="1" max="2000" /></label>
+    <div class="hintbox">Give <b>seed handles</b> to collect known pages (no login needed). Leave them blank and just describe a topic — the task uses <b>Claude + partitioned search</b> (many sub-queries) to discover as many public pages as it can, then collects them all. Topic discovery needs Claude connected (Settings) and/or an Instagram <b>Session ID</b> (Platforms).</div>
   `, `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="saveTask">Create &amp; run</button>`);
 
   $('#saveTask').addEventListener('click', async () => {
@@ -233,7 +284,7 @@ function openTaskForm() {
       prompt = (prompt ? prompt + '\n\nTargets: ' : 'Collect these profiles: ') + tags;
     }
     const payload = { title: $('#t_title').value.trim() || null, prompt, platform: $('#t_platform').value,
-      goal_target: +$('#t_goal').value || 25, max_iterations: +$('#t_max').value || 12 };
+      goal_target: +$('#t_goal').value || 0, max_iterations: 12 };
     try {
       const task = await api.post('/api/tasks', payload);
       await api.post(`/api/tasks/${task.id}/start`);
@@ -246,6 +297,8 @@ function openTaskForm() {
 let detailTimer = null, detailLastSeq = 0, detailResultsTimer = null;
 async function openTask(id, silent) {
   clearTimeout(taskPollTimer);
+  currentTaskId = id;
+  if (location.hash.slice(1) !== 'tasks/' + id) location.hash = 'tasks/' + id;
   const t = await api.get(`/api/tasks/${id}`).catch((e) => { toast(e.message, 'bad'); });
   if (!t) return;
   $('#taskListWrap').hidden = true;
@@ -293,7 +346,7 @@ async function openTask(id, silent) {
       <div class="muted xs followup-note">The follow-up is appended to this task and re-queued — it runs after the current queue clears.</div>
     </div>`;
 
-  $('#backTasks').addEventListener('click', () => { clearTimeout(detailTimer); clearTimeout(detailResultsTimer); loadTasks(); });
+  $('#backTasks').addEventListener('click', () => { clearTimeout(detailTimer); clearTimeout(detailResultsTimer); showView('tasks'); });
   const runBtn = $('#d_run'); if (runBtn) runBtn.addEventListener('click', async () => { await taskAction('start', id); });
   const stopBtn = $('#d_stop'); if (stopBtn) stopBtn.addEventListener('click', async () => { await taskAction('stop', id); });
   $('#d_csv').addEventListener('click', () => window.open(`/api/results/export?fmt=csv&task_id=${id}`, '_blank'));
@@ -345,7 +398,7 @@ async function pumpResults(id) {
     const tb = $('#detailResults tbody'); if (!tb) { clearTimeout(detailResultsTimer); return; }
     $('#resCount').textContent = rows.length ? `${rows.length}` : '';
     tb.innerHTML = rows.length ? rows.map((p) => `<tr>
-      <td><div class="profile-cell"><div class="pfp">${esc((p.username[0] || '?').toUpperCase())}</div>
+      <td><div class="profile-cell">${avatarHtml(p.username, p.profile_pic_url)}
         <div class="handle">@${esc(p.username)}<br/><small>${esc(p.full_name || '')}</small></div></div></td>
       <td class="num">${fmt(p.followers)}</td>
       <td>${p.is_verified ? '<span class="badge completed mini">verified</span> ' : ''}${p.is_private ? '<span class="badge draft mini">private</span>' : ''}</td>
@@ -493,18 +546,26 @@ async function loadSettings() {
       $('#claudeRecheck').addEventListener('click', () => claudeLogin(true));
     } else {
       const noSdk = !st.sdk_available;
+      const detected = st.cli_logged_in && !noSdk;
       p.innerHTML = `
         <div class="claude-row">
           <div class="conn-ic claude-ic big">✦</div>
-          <div><div class="conn-name">Not connected</div>
-            <div class="muted xs">Sign in with your Claude Code account.</div></div>
+          <div><div class="conn-name">${detected ? 'Claude Code detected' : 'Not connected'}</div>
+            <div class="muted xs">${detected ? 'A Claude Code login was found on this machine.' : 'Sign in with your Claude Code account.'}</div></div>
         </div>
         ${noSdk
           ? `<div class="hintbox err">Claude Agent SDK is not installed. Run <code>pip install claude-agent-sdk</code> (bundled in the Docker image).</div>`
-          : `<p class="muted xs">Uses the official <b>Claude Agent SDK</b> and your existing <b>Claude Code login</b> (OAuth). No API key or token needed.</p>`}
-        <button class="btn btn-primary btn-block" id="claudeLogin" ${noSdk ? 'disabled' : ''}>✦ Login with Claude Code</button>
+          : detected
+            ? `<div class="hintbox">Detected automatically — connecting via the official Claude Agent SDK (OAuth login). No API key needed.</div>`
+            : `<p class="muted xs">Uses the official <b>Claude Agent SDK</b> and your <b>Claude Code login</b> (OAuth). If you are not signed in, open Claude Code (desktop app or CLI) and log in, then retry.</p>`}
+        <button class="btn btn-primary btn-block" id="claudeLogin" ${noSdk ? 'disabled' : ''}>${detected ? 'Connect Claude Code' : '✦ Login with Claude Code'}</button>
         <div id="claudeResult"></div>`;
       $('#claudeLogin')?.addEventListener('click', () => claudeLogin(false));
+      // Auto-connect once if a local login is detected.
+      if (detected && !sessionStorage.getItem('claudeAutoTried')) {
+        try { sessionStorage.setItem('claudeAutoTried', '1'); } catch (_) {}
+        claudeLogin(false);
+      }
     }
   } catch (e) { toast(e.message, 'bad'); }
 }
@@ -532,4 +593,4 @@ async function claudeLogin(recheck) {
 document.addEventListener('click', (e) => { if (e.target.id === 'fullReportBtn') window.open('/api/report', '_blank'); });
 
 // ── Boot ───────────────────────────────────────────────────
-showView(location.hash.slice(1) || 'dashboard');
+applyRoute();

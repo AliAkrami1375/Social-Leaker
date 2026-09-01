@@ -37,7 +37,7 @@ def create_task(payload: TaskIn, db: Session = Depends(get_db), user: User = Dep
         title=(payload.title or _default_title(payload.prompt)),
         prompt=payload.prompt,
         platform=payload.platform,
-        goal_target=max(1, min(payload.goal_target, 500)),
+        goal_target=max(0, min(payload.goal_target, 2000)),
         max_iterations=max(1, min(payload.max_iterations, 50)),
         owner_id=user.id,
         status=TaskStatus.draft,

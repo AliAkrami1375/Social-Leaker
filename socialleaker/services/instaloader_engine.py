@@ -36,13 +36,25 @@ class InstaloaderEngine(BaseEngine):
         if self._L is not None:
             return self._L
         import instaloader
+        from instaloader import RateController
+
+        # Instaloader's built-in rate controller can sleep for many minutes when
+        # Instagram throttles, which would block the worker thread (and the whole
+        # task queue). Cap its internal sleep so requests fail fast; our own
+        # cancellable, visible backoff in the task loop then paces retries.
+        class _CappedRateController(RateController):
+            def sleep(self, secs: float) -> None:  # noqa: D401
+                import time as _t
+                _t.sleep(min(secs, 3.0))
 
         L = instaloader.Instaloader(
             quiet=True,
             download_pictures=False, download_videos=False,
             download_video_thumbnails=False, download_comments=False,
             save_metadata=False, compress_json=False,
-            max_connection_attempts=2,
+            max_connection_attempts=1,
+            request_timeout=15.0,
+            rate_controller=lambda ctx: _CappedRateController(ctx),
         )
         if self._sessionid:
             try:

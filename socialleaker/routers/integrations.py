@@ -230,6 +230,7 @@ def claude_status(db: Session = Depends(get_db), user: User = Depends(get_curren
         "connected_at": row.connected_at.isoformat() if row and row.connected_at else None,
         "sdk_available": claude_agent.available(),
         "sdk_version": claude_agent.sdk_version(),
+        "cli_logged_in": claude_agent.credentials_present(),
         "last_error": meta.get("last_error"),
     }
 

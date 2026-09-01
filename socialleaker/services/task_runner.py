@@ -149,36 +149,53 @@ def _parse_handle_list(text: str) -> list[str]:
     return re.findall(r"@?([A-Za-z0-9._]{2,30})", text)
 
 
-def claude_discover(topic: str, platform: str, limit: int, step, db, owner_id) -> list[str]:
-    """Use the connected Claude account to propose public pages for a topic.
+def _parse_discovery(text: str) -> tuple[list[str], list[str]]:
+    """Parse Claude's {"handles": [...], "queries": [...]} discovery object."""
+    m = re.search(r"\{.*\}", text or "", re.S)
+    if m:
+        try:
+            obj = json.loads(m.group(0))
+            handles = [str(x).lstrip("@").strip() for x in (obj.get("handles") or []) if str(x).strip()]
+            queries = [str(x).strip() for x in (obj.get("queries") or []) if str(x).strip()]
+            if handles or queries:
+                return list(dict.fromkeys(handles)), list(dict.fromkeys(queries))
+        except Exception:
+            pass
+    return list(dict.fromkeys(_parse_handle_list(text))), []
 
-    Scoped to public organisations, brands, media and notable public figures —
-    not private individuals. If Claude declines or returns nothing, we fall back.
+
+def claude_discover(topic: str, platform: str, step, db, owner_id) -> dict:
+    """Ask the connected Claude account for public pages AND search partitions.
+
+    Returns {"handles": [...], "queries": [...]} — the queries are sub-topics /
+    keyword variations / hashtags used to partition the search so collection is
+    comprehensive rather than capped at a single number. Scoped to public
+    organisations, brands, media and communities — not private individuals.
     """
     from . import claude_agent
+    empty = {"handles": [], "queries": []}
     if not (_claude_connected(db, owner_id) and claude_agent.available()):
-        return []
+        return empty
     ds = step.add("plan", "Discovering with Claude",
-                  f"Asking Claude to identify public {platform} pages about “{topic}”.",
-                  status=StepStatus.running, tokens=1500)
+                  f"Asking Claude to map public {platform} pages for “{topic}”.",
+                  status=StepStatus.running, tokens=1800)
     prompt = (
-        f"I am assembling an authorised, public-only market-research list of {platform} "
-        f"accounts. For the topic: \"{topic}\", give up to {limit} well-known PUBLIC "
-        f"{platform} accounts — organisations, brands, media outlets, communities or clearly "
-        f"public figures in that space. Return ONLY a JSON array of {platform} handles "
-        f"(usernames, without the @). No commentary and no private individuals."
+        f'For the topic "{topic}" on {platform}, help build an authorised, PUBLIC-only '
+        f'research list. Return ONLY a JSON object of the form '
+        f'{{"handles": [up to 60 public {platform} usernames without @], '
+        f'"queries": [10-14 search phrases, sub-topics or hashtags that would surface MORE '
+        f'public accounts on this topic]}}. Public organisations, brands, media outlets and '
+        f'communities only — no private individuals, no commentary.'
     )
-    res = claude_agent.ask_sync(prompt)
+    res = _run_with_timeout(lambda: claude_agent.ask_sync(prompt, timeout=100), 120,
+                            {"ok": False, "error": "Claude discovery timed out."})
     if not res.get("ok"):
         step.finish(ds, StepStatus.failed, f"Claude discovery unavailable: {res.get('error')}")
-        return []
-    handles = list(dict.fromkeys(_parse_handle_list(res.get("text", ""))))[:limit]
-    if handles:
-        shown = ", ".join("@" + h for h in handles[:12]) + ("…" if len(handles) > 12 else "")
-        step.finish(ds, StepStatus.done, f"Claude proposed {len(handles)} page(s): {shown}")
-    else:
-        step.finish(ds, StepStatus.failed, "Claude did not return usable handles for this topic.")
-    return handles
+        return empty
+    handles, queries = _parse_discovery(res.get("text", ""))
+    step.finish(ds, StepStatus.done,
+                f"Claude proposed {len(handles)} handle(s) and {len(queries)} search partition(s).")
+    return {"handles": handles, "queries": queries}
 
 
 def _persist(db, task: Task, data: ProfileData) -> None:
@@ -214,8 +231,47 @@ def _sleep_cancellable(seconds: float, cancel: threading.Event) -> None:
         time.sleep(min(1.0, remaining))
 
 
+def _collect_with_timeout(engine, handle: str, timeout: float = 45.0) -> ProfileData:
+    """Run a single collection with a hard timeout so a hung network call can
+    never block the worker (and therefore the whole task queue)."""
+    result: dict = {}
+
+    def work() -> None:
+        try:
+            result["data"] = engine.collect_profile(handle)
+        except Exception as exc:  # noqa: BLE001
+            result["err"] = exc
+
+    th = threading.Thread(target=work, daemon=True)
+    th.start()
+    th.join(timeout)
+    if th.is_alive():
+        raise TimeoutError(f"collection timed out after {int(timeout)}s")
+    if "err" in result:
+        raise result["err"]
+    return result["data"]
+
+
+def _run_with_timeout(fn, timeout: float, default):
+    """Run fn() in a daemon thread and return its result, or `default` if it does
+    not finish in time (the thread is abandoned, so it never blocks the queue)."""
+    box = {"v": default}
+
+    def work() -> None:
+        try:
+            box["v"] = fn()
+        except Exception:  # noqa: BLE001
+            box["v"] = default
+
+    th = threading.Thread(target=work, daemon=True)
+    th.start()
+    th.join(timeout)
+    return box["v"]
+
+
 def _collect_frontier(db, task: Task, step: "_Stepper", engine, frontier: list[str],
-                      already: set[str], cancel: threading.Event) -> None:
+                      already: set[str], cancel: threading.Event,
+                      max_items: int | None = None) -> None:
     """Collect every handle in the frontier, paced and rate-limit aware.
 
     Resumable: handles already present in ``already`` are skipped, so a task that
@@ -231,9 +287,10 @@ def _collect_frontier(db, task: Task, step: "_Stepper", engine, frontier: list[s
                  status=StepStatus.done)
         return
 
+    cap = max_items or settings.scrape_max_items
     backoff = settings.scrape_backoff_base
     batch = 5
-    while pending and not cancel.is_set() and task.collected_count < settings.scrape_max_items:
+    while pending and not cancel.is_set() and task.collected_count < cap:
         chunk = [pending.pop(0) for _ in range(min(batch, len(pending)))]
         task.iterations = (task.iterations or 0) + 1
         db.commit()
@@ -248,7 +305,7 @@ def _collect_frontier(db, task: Task, step: "_Stepper", engine, frontier: list[s
             retries = 0
             while not cancel.is_set():
                 try:
-                    data = engine.collect_profile(handle)
+                    data = _collect_with_timeout(engine, handle)
                     _persist(db, task, data)
                     task.requests_count += 1
                     db.commit()
@@ -330,9 +387,8 @@ def run_task(task_id: int) -> None:
         if not frontier:
             s = step.add("plan", "Interpreting the goal", status=StepStatus.running, tokens=420)
             handles, target = parse_prompt(task.prompt)
-            goal = min(target or task.goal_target or 25, settings.scrape_max_items)
-            task.goal_target = goal
-            db.commit()
+            # Optional cap only. 0 / blank means "collect everything discovered".
+            cap = int(target or task.goal_target or 0)
             if engine.sandbox:
                 step.add("plan", "Sandbox mode",
                          "No live credentials — using demo data marked [SANDBOX].",
@@ -340,24 +396,27 @@ def run_task(task_id: int) -> None:
             if not handles:
                 topic = build_search_query(task.prompt) or task.prompt.strip()
                 discovered: list[str] = []
-                discovered += claude_discover(topic, task.platform, min(goal, 40),
-                                              step, db, task.owner_id)
-                if len(discovered) < goal:
-                    ds = step.add("plan", "Discovering via platform search",
-                                  f"Searching {task.platform} for “{topic}”.",
-                                  status=StepStatus.running, tokens=220)
-                    try:
-                        found = engine.search_users(topic, limit=goal)
-                    except Exception:
-                        found = []
+
+                # 1) Claude proposes handles + search partitions (sub-topics/hashtags).
+                disc = claude_discover(topic, task.platform, step, db, task.owner_id)
+                discovered += disc.get("handles", [])
+
+                # 2) Partitioned search: the base topic plus each Claude sub-query.
+                queries = list(dict.fromkeys([topic] + disc.get("queries", [])))[:14]
+                ss = step.add("plan", "Partitioned search",
+                              f"Searching {len(queries)} segment(s) on {task.platform} "
+                              "to cover the whole topic.", status=StepStatus.running, tokens=200)
+                seg_total = 0
+                for q in queries:
+                    if cancel.is_set():
+                        break
+                    found = _run_with_timeout(lambda q=q: engine.search_users(q, limit=50), 40, [])
                     if found:
                         discovered += found
-                        shown = ", ".join("@" + h for h in found[:10]) + ("…" if len(found) > 10 else "")
-                        step.finish(ds, StepStatus.done, f"Search added {len(found)} page(s): {shown}")
-                    else:
-                        step.finish(ds, StepStatus.failed,
-                                    f"{task.platform.title()} search returned nothing "
-                                    "(connect an account to enable it).")
+                        seg_total += len(found)
+                step.finish(ss, StepStatus.done,
+                            f"{len(queries)} segment(s) searched — {seg_total} result(s) merged.")
+
                 handles = list(dict.fromkeys(h.lstrip("@") for h in discovered if h.strip()))
                 if not handles:
                     fail = ("Could not discover pages. Connect Claude (Settings) for AI-assisted "
@@ -370,15 +429,19 @@ def run_task(task_id: int) -> None:
                     db.commit()
                     return
             frontier = list(dict.fromkeys(h.lstrip("@") for h in handles if h.strip()))
+            task.goal_target = cap  # store the optional cap (0 = all)
             task.frontier_json = json.dumps(frontier, ensure_ascii=False)
             db.commit()
             step.finish(s, StepStatus.done,
-                        f"Planned {len(frontier)} page(s): "
-                        + ", ".join("@" + h for h in frontier[:12])
+                        f"Planned {len(frontier)} page(s)"
+                        + (f", cap {cap}" if cap else ", no cap — collect all")
+                        + ": " + ", ".join("@" + h for h in frontier[:12])
                         + ("…" if len(frontier) > 12 else ""))
 
         # ── COLLECT (paced, rate-limit aware, resumable) ────────
-        _collect_frontier(db, task, step, engine, frontier, already, cancel)
+        cap = int(task.goal_target or 0)
+        max_items = min(cap, settings.scrape_max_items) if cap > 0 else settings.scrape_max_items
+        _collect_frontier(db, task, step, engine, frontier, already, cancel, max_items)
 
         # ── DONE ────────────────────────────────────────────────
         if cancel.is_set():

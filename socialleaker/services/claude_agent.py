@@ -33,6 +33,18 @@ def sdk_version() -> str | None:
         return None
 
 
+def credentials_present() -> bool:
+    """True if this machine appears to already have a Claude Code login (or an
+    API key), so the panel can auto-connect without prompting."""
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return True
+    try:
+        cred = os.path.join(os.path.expanduser("~"), ".claude", ".credentials.json")
+        return os.path.exists(cred)
+    except Exception:
+        return False
+
+
 def _looks_like_auth_error(text: str) -> bool:
     t = (text or "").lower()
     return any(w in t for w in ("login", "log in", "unauthor", "authenticat",
@@ -77,12 +89,21 @@ async def verify_connection(cwd: str | None = None) -> dict:
         return {"ok": False, "error": msg[:400], "need_login": _looks_like_auth_error(msg)}
 
 
-def ask_sync(prompt: str, cwd: str | None = None, max_turns: int = 4) -> dict:
-    """Blocking wrapper around ask(), for use from the worker-thread task loop."""
+def ask_sync(prompt: str, cwd: str | None = None, max_turns: int = 4,
+             timeout: float = 90.0) -> dict:
+    """Blocking wrapper around ask(), for use from the worker-thread task loop.
+
+    Bounded by a timeout so a stuck agent query can never hang the task queue.
+    """
     import asyncio
 
+    async def _runner() -> dict:
+        return await asyncio.wait_for(ask(prompt, cwd=cwd, max_turns=max_turns), timeout)
+
     try:
-        return asyncio.run(ask(prompt, cwd=cwd, max_turns=max_turns))
+        return asyncio.run(_runner())
+    except asyncio.TimeoutError:
+        return {"ok": False, "error": f"Claude query timed out after {int(timeout)}s."}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)[:400]}
 

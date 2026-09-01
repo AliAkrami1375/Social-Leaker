@@ -5,7 +5,7 @@ import csv
 import io
 import json
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -43,6 +43,38 @@ def list_results(
     col = getattr(CollectedProfile, sort)
     col = col.desc() if order == "desc" else col.asc()
     return query.order_by(col).offset(offset).limit(limit).all()
+
+
+_AVATAR_HOSTS = ("cdninstagram.com", "fbcdn.net", "redd.it", "redditstatic.com", "redditmedia.com")
+
+
+@router.get("/avatar")
+def avatar_proxy(u: str, _: User = Depends(get_current_user)):
+    """Proxy a profile image through our origin.
+
+    Social CDNs (Instagram/Reddit) block hotlinking by referer and expire signed
+    URLs; fetching server-side (no referer) lets the browser display the picture,
+    with a graceful 404 → letter fallback when the upstream URL has expired.
+    Restricted to known image hosts to avoid SSRF.
+    """
+    from urllib.parse import urlparse
+    import httpx
+
+    host = (urlparse(u).hostname or "").lower()
+    if not host or not any(host == h or host.endswith("." + h) for h in _AVATAR_HOSTS):
+        raise HTTPException(400, "Image host not allowed")
+    try:
+        r = httpx.get(u, timeout=12, follow_redirects=True, headers={
+            "User-Agent": "Mozilla/5.0", "Accept": "image/avif,image/webp,image/*,*/*"})
+        ctype = r.headers.get("content-type", "")
+        if r.status_code != 200 or not ctype.startswith("image"):
+            raise HTTPException(404, "Image unavailable")
+        return Response(content=r.content, media_type=ctype,
+                        headers={"Cache-Control": "public, max-age=86400"})
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(404, "Image unavailable")
 
 
 @router.get("/results/export")
