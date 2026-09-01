@@ -1,0 +1,28 @@
+# ── Python ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ── Secrets / environment ───────────────────────────────
+.env
+.env.local
+*.key
+*.pem
+
+# ── Runtime data — NEVER commit ─────────────────────────
+# The data directory holds the local SQLite database, cached Instagram
+# sessions, sessionid cookies and Claude tokens. None of it may be pushed.
+data/*
+!data/.gitkeep
+
+# ── OS / editor ─────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+node_modules/
+scratchpad/

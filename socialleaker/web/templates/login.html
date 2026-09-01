@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in · {{ app_name }}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body class="auth-body">
+  <div class="auth-wrap">
+    <div class="auth-aside">
+      <div class="brand">
+        <svg class="brand-svg" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true">
+          <defs><linearGradient id="slBrandA" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#7c5cff"/><stop offset=".55" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs>
+          <rect x="4" y="4" width="56" height="56" rx="17" fill="url(#slBrandA)"/>
+          <g fill="none" stroke="#fff" stroke-linecap="round">
+            <path d="M17 43 A16 16 0 0 1 47 43" stroke-width="3.4"/>
+            <path d="M12 45 A22 22 0 0 1 52 45" stroke-width="2.6" opacity=".5"/></g>
+          <path d="M32 44 L45 21" stroke="#fff" stroke-width="2" opacity=".55" stroke-linecap="round"/>
+          <circle cx="32" cy="44" r="4.4" fill="#fff"/><circle cx="45" cy="21" r="3.6" fill="#fff"/>
+        </svg>
+        <span class="brand-name">Social&nbsp;Leaker</span>
+      </div>
+      <h1 class="auth-headline">Intelligence panel for<br/>social-media collection.</h1>
+      <p class="auth-sub">
+        Define objectives, deploy an autonomous Claude Code agent over ACP,
+        and turn public social signals into a structured, exportable dataset.
+      </p>
+      <ul class="auth-features">
+        <li><span>◆</span> Objective-driven collection campaigns</li>
+        <li><span>◆</span> Live Claude Code ACP agent console</li>
+        <li><span>◆</span> SQLite-backed, fully self-hosted</li>
+        <li><span>◆</span> CSV / JSON export &amp; analytics</li>
+      </ul>
+      <div class="auth-foot">
+        <a class="dibachain-credit" href="https://dibachain.ir/" target="_blank" rel="noopener">
+          <img src="/static/img/dibachain.png" alt="Dibachain" />
+          <span>A product of <b>Dibachain</b> · dibachain.ir</span>
+        </a>
+        <div class="muted xs" style="margin-top:8px">v1.0 · self-hosted · for authorised research only</div>
+      </div>
+    </div>
+
+    <div class="auth-main">
+      <form id="loginForm" class="auth-card" autocomplete="on">
+        <h2>Welcome back</h2>
+        <p class="muted">Sign in to access the panel.</p>
+
+        <label class="field">
+          <span>Username</span>
+          <input id="username" name="username" type="text" required autofocus placeholder="admin" />
+        </label>
+
+        <label class="field">
+          <span>Password</span>
+          <input id="password" name="password" type="password" required placeholder="••••••••" />
+        </label>
+
+        <div id="loginError" class="form-error" hidden></div>
+
+        <button type="submit" class="btn btn-primary btn-block" id="loginBtn">
+          Sign in
+        </button>
+
+        <p class="hint muted">Default dev credentials: <code>admin / admin</code></p>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('loginForm');
+    const errBox = document.getElementById('loginError');
+    const btn = document.getElementById('loginBtn');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errBox.hidden = true;
+      btn.disabled = true;
+      btn.textContent = 'Signing in…';
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: document.getElementById('username').value,
+            password: document.getElementById('password').value,
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.detail || 'Invalid credentials');
+        }
+        window.location.href = '/';
+      } catch (err) {
+        errBox.textContent = err.message;
+        errBox.hidden = false;
+        btn.disabled = false;
+        btn.textContent = 'Sign in';
+      }
+    });
+  </script>
+</body>
+</html>

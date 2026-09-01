@@ -1,0 +1,17 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="slFav" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7c5cff"/>
+      <stop offset=".55" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="17" fill="url(#slFav)"/>
+  <g fill="none" stroke="#fff" stroke-linecap="round">
+    <path d="M17 43 A16 16 0 0 1 47 43" stroke-width="3.4"/>
+    <path d="M12 45 A22 22 0 0 1 52 45" stroke-width="2.6" opacity=".5"/>
+  </g>
+  <path d="M32 44 L45 21" stroke="#fff" stroke-width="2" opacity=".55" stroke-linecap="round"/>
+  <circle cx="32" cy="44" r="4.4" fill="#fff"/>
+  <circle cx="45" cy="21" r="3.6" fill="#fff"/>
+</svg>

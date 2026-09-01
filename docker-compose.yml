@@ -1,0 +1,34 @@
+# ── Social Leaker — docker-compose ──────────────────────────────────
+# Bring the whole system up with:   docker compose up -d --build
+# Then open http://localhost:8000  (default login: admin / admin)
+
+services:
+  social-leaker:
+    build: .
+    image: social-leaker:latest
+    container_name: social-leaker
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Bind inside the container to all interfaces so the port mapping works.
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8000"
+      DATABASE_URL: "sqlite:///./data/socialleaker.db"
+    volumes:
+      # The SQLite database + Instagram sessions live on the HOST, outside the
+      # container — data survives rebuilds and `docker compose down`.
+      - ./data:/app/data
+
+      # OPTIONAL: reuse your host machine's Claude Code login for the ACP agent.
+      # Uncomment on Linux/macOS (adjust the path on Windows):
+      # - ${HOME}/.claude:/root/.claude:ro
+
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

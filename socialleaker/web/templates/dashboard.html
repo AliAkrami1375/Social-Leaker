@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ app_name }} · Panel</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <svg class="brand-svg" viewBox="0 0 64 64" width="30" height="30" aria-hidden="true">
+          <defs><linearGradient id="slBrandB" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#7c5cff"/><stop offset=".55" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs>
+          <rect x="4" y="4" width="56" height="56" rx="17" fill="url(#slBrandB)"/>
+          <g fill="none" stroke="#fff" stroke-linecap="round">
+            <path d="M17 43 A16 16 0 0 1 47 43" stroke-width="3.4"/>
+            <path d="M12 45 A22 22 0 0 1 52 45" stroke-width="2.6" opacity=".5"/></g>
+          <path d="M32 44 L45 21" stroke="#fff" stroke-width="2" opacity=".55" stroke-linecap="round"/>
+          <circle cx="32" cy="44" r="4.4" fill="#fff"/><circle cx="45" cy="21" r="3.6" fill="#fff"/>
+        </svg>
+        <span class="brand-name">Social&nbsp;Leaker</span>
+      </div>
+
+      <nav class="nav">
+        <a class="nav-item active" data-view="dashboard"><span class="ni">▤</span> Dashboard</a>
+        <a class="nav-item" data-view="tasks"><span class="ni">✦</span> Tasks</a>
+        <a class="nav-item" data-view="platforms"><span class="ni">◎</span> Platforms</a>
+        <a class="nav-item" data-view="settings"><span class="ni">⚙</span> Settings</a>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="agent-badge" id="agentBadge"><span class="dot"></span> Claude agent</div>
+        <a class="dibachain-credit small" href="https://dibachain.ir/" target="_blank" rel="noopener">
+          <img src="/static/img/dibachain.png" alt="Dibachain" />
+          <span>by <b>Dibachain</b></span>
+        </a>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="main">
+      <header class="topbar">
+        <div class="topbar-title" id="viewTitle">Dashboard</div>
+        <div class="topbar-actions">
+          <div class="user-chip">
+            <span class="avatar">{{ username[0]|upper }}</span>
+            <div class="user-meta">
+              <div class="user-name">{{ username }}</div>
+              <div class="user-role">{{ role }}</div>
+            </div>
+          </div>
+          <button class="btn btn-ghost" id="logoutBtn">Sign out</button>
+        </div>
+      </header>
+
+      <main class="content" id="content">
+
+        <!-- ── Dashboard ─────────────────────────────── -->
+        <section class="view" data-view="dashboard">
+          <div class="stat-grid" id="statGrid"></div>
+          <div class="panel-row">
+            <div class="panel">
+              <div class="panel-head"><h3>Recent tasks</h3>
+                <button class="btn btn-sm btn-ghost" data-goto="tasks">View all</button></div>
+              <div id="recentTasks" class="mini-list"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h3>Connections</h3></div>
+              <div id="connSummary" class="conn-summary"></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>Usage report</h3>
+              <button class="btn btn-sm btn-ghost" id="fullReportBtn">⬇ Download full report (JSON)</button></div>
+            <div id="usageReport" class="usage-report"></div>
+          </div>
+        </section>
+
+        <!-- ── Tasks ─────────────────────────────────── -->
+        <section class="view" data-view="tasks" hidden>
+          <!-- list -->
+          <div id="taskListWrap">
+            <div class="view-actions">
+              <button class="btn btn-primary" id="newTaskBtn">+ New task</button>
+              <div class="spacer"></div>
+              <span class="muted xs" id="taskCount"></span>
+            </div>
+            <div id="taskList" class="card-grid"></div>
+          </div>
+          <!-- detail -->
+          <div id="taskDetail" hidden></div>
+        </section>
+
+        <!-- ── Platforms ─────────────────────────────── -->
+        <section class="view" data-view="platforms" hidden>
+          <p class="muted section-lead">Connect the social platforms you are authorised to collect from.
+            Instagram is live; more are coming soon.</p>
+          <div id="platformGrid" class="platform-grid"></div>
+        </section>
+
+        <!-- ── Settings ──────────────────────────────── -->
+        <section class="view" data-view="settings" hidden>
+          <div class="settings-grid">
+            <div class="panel">
+              <div class="panel-head"><h3>Claude agent</h3></div>
+              <div class="panel-body" id="claudePanel"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h3>Account</h3></div>
+              <div class="panel-body">
+                <div class="detail-grid">
+                  <div><div class="dk">Signed in as</div><div class="dv">{{ username }}</div></div>
+                  <div><div class="dk">Role</div><div class="dv" style="text-transform:capitalize">{{ role }}</div></div>
+                </div>
+                <p class="muted xs">User management is available via the CLI:
+                  <code>python -m socialleaker.cli adduser</code>.</p>
+              </div>
+            </div>
+
+            <div class="panel about-panel">
+              <div class="panel-head"><h3>About</h3></div>
+              <div class="panel-body about-body">
+                <img class="about-logo" src="/static/img/dibachain.png" alt="Dibachain" />
+                <div>
+                  <div class="about-title">Social Leaker</div>
+                  <p class="muted">A social-media intelligence &amp; collection platform — a product of
+                    <b>Dibachain</b>. Built for authorised OSINT and marketing research.</p>
+                  <a class="btn btn-ghost btn-sm" href="https://dibachain.ir/" target="_blank" rel="noopener">Visit dibachain.ir ↗</a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modalBackdrop" hidden><div class="modal" id="modal"></div></div>
+  <div class="toast-host" id="toastHost"></div>
+
+  <script>window.SL_USER = { name: "{{ username }}", role: "{{ role }}" };</script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# Keep the build context small; data + secrets stay on the host.
+data/
+*.db
+*.sqlite3
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.git/
+.gitignore
+.idea/
+.vscode/
+*.log
+node_modules/
+scratchpad/

@@ -1,0 +1,37 @@
+# ── Social Leaker — Python dependencies ─────────────────────────────
+# Web framework / server
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+jinja2==3.1.5
+python-multipart==0.0.20
+websockets==14.1
+
+# Data layer
+SQLAlchemy==2.0.36
+
+# Config / validation
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-dotenv==1.0.1
+
+# Auth
+PyJWT==2.10.1
+bcrypt==4.2.1
+
+# HTTP client (ACP health checks, misc.)
+httpx==0.28.1
+
+# CLI
+typer==0.15.1
+rich==13.9.4
+
+# Claude Code integration (official SDK; bundles the Claude Code CLI).
+# Authenticates via your Claude Code login (OAuth) — no API key required.
+claude-agent-sdk==0.2.149
+
+# ── Instagram collection engine ─────────────────────────────────────
+# Instaloader is the primary engine — it reads public profile data without a
+# login (most reliable). instagrapi is a secondary private-API backend.
+instaloader==4.15.3
+instagrapi==2.18.18
+Pillow==11.1.0
